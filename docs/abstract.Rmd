@@ -1,0 +1,66 @@
+---
+title: "ISPOR Europe 2021: number of goals vs number of attainment levels"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Important dates
+
+* Deadline: Tuesday, June 29 2021
+* Acceptance notification: Tuesday, August 17 2021
+* Conference: December 1-3 2021
+
+# Guidelines
+
+* Title in title case
+* Study approach:
+    * Decision Modeling & Simulation
+* Choose a topics and subtopics, some relevant ones to this abstract:
+    * Clinical Outcomes
+        * Clinician Report Outcomes
+    * Methodological & Statistical Research
+        * **Modeling & Simulation**
+    * Patient-Centered Research
+        * Stated Preference & Patient Satisfaction
+        * Patient-reported Outcomes & Quality of Life Outcomes
+* Specific disease/specialized treatment area
+    * Can select up to 4 that best describes your research
+    * You can choose "multiple" if one choice does not apply
+* 300 words or fewer
+* No tables or graphs
+* Research presented at a previous ISPOR meeting is not allowed
+
+\newpage
+
+# Abstract
+
+Descriptive title: Number of Goals per Subject and Number of Attainment Level in Goal Attainment Scaling: A Simulation Study
+
+Better title: ??
+
+Authors: Taylor, Justin, Kari, Sanja, Susan, Ken
+
+## Background
+
+Goal attainment scaling (GAS) is a patient-centric outcome measure that captures meaningful change through personally identified goals of treatment.
+Traditionally, it is recommended to set a minimum of three goals per subject, each with a 5-point scale of possible outcomes called attainment levels.
+Using data simulation techniques, we investigated the relationship between the number of goals per subject, number of attainment levels per goal, and the statistical power of detecting a treatment effect in a cross-sectional trial.
+
+## Methods
+
+We employed a probabilistic model introduced by Urach et al. (2019) for generating GAS data.
+We varied the number of subjects $m$ (40, 60, 80; randomly allocated to control or treatment group with equal probability), the treatment effect size $\delta$ (0.3, 0.4, 0.5), and the parameters of interest: number of goals per subject $n_g$ (from 1 to 7), and the number of attainment levels $n_a$ (3, 5, 7).
+For each set of parameters, 1000 trials were simulated and a two-sided $t$-test was performed on summary T-scores.
+Power was computed as the percentage of simulations detecting a significant treatment effect at $\alpha$ = 0.05.
+
+## Results
+
+The gains in statistical power were minimal or non-zero when varying number of attainment levels $n_a$.
+
+## Conclusions
+
+When planning a study that employs GAS, there is a minor trade-off in statistical power between number of goals and number of attainment levels.
+In scenarios where it is feasible to set a high number of goals per subject, it may be appropriate to construct 3-point scales in order to save time during goal-setting interviews.

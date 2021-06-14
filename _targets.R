@@ -20,8 +20,8 @@ set.seed(15)
 list(
   tar_target(n_goals, c(1, 2, 3, 4, 5, 6, 7)),
   tar_target(n_levels, c(3, 5, 7)),
-  tar_target(n_subjects, c(40, 60)),
-  tar_target(delta, c(0.3, 0.5)),
+  tar_target(n_subjects, c(40, 60, 80)),
+  tar_target(delta, c(0.3, 0.5, 0.7)),
   tar_target(
     sim_data,
     simulate(n_goals, n_levels, n_subjects, delta,
