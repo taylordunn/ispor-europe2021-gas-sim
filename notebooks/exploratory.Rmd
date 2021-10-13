@@ -1,5 +1,5 @@
 ---
-title: "GAS simulations: number of goals and attainment levels"
+title: "GAS simulations: GAS score distributions"
 subtitle: "Exploratory analysis"
 author: "Taylor Dunn"
 date: "`r Sys.Date()`"
@@ -22,7 +22,7 @@ body .main-container {
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE,
-  fig.width = 6, fig.height = 4, dpi = 150
+  fig.width = 7, fig.height = 4, dpi = 150
 )
 ```
 
@@ -40,61 +40,81 @@ set_ardea_defaults()
 
 # Motivation
 
-From Chapter 10 of @Kiresuk1993, page 215, on the topic of 5-point scales versus 3-point scales:
+The simulation technique introduced by @Urach2019 returns latent variable goal scores which (in the absence of a treatment effect) will be normally distributed with mean 0 and SD 1:
 
->Although it is natural to prefer more reliable scale scores whenever possible, the overriding concern must be the reliability of the summary GAS score.
->Increasing the number of scales on a follow-up guide will also increase the reliability of the GAS score (cf. Epstein, 1980).
->Conceivably one could achieve the same reliability with a larger number of 3-point scales than with fewer 5-point scales.
+```{r fig.height=3, fig.width=4}
+d <- tibble(x_continuous = rnorm(1e4, mean = 0, sd = 1))
 
->To make an informed choice one needs to know both how many extra 3-point scales must be constructed to reach parity with the 5-point scales and also the practical implications of such a strategy.
->One approach to the former requires consideration of the number of distinct values of the summary GAS score that can be generated under each alternative.
->Each 5-point scale can produce any one of five distinct values (e.g. -2, -1, 0, +1, or +2).
->With three such scales, the sum of the scale coulds could be any integer value from -6 to +6, a range that includes 13 distinct values.
->Thus any summary GAS score based upon the sum, or average, of the scale scores could take on only 13 distinct values so that the summary score is essentially a 13-point scale.
->The reader should note that it does not matter what scoring system is used for the scale scores.
->Whether scales are scored from -2 to +2, from 1 to 5, or from 10 to 50 does not matter; three 5-point scales will produce summary scores on a 13-point scale.
-
->The question now becomes how many 3-point scales are required to produce a 13-point summary score.
->The 3-point scales can yield any one of just three possible scores that, for convenience, we assume to be -1, 0, or +2.
->For the summary score to have 13 possible distinct values, the sum of the individual scale scores again must be able to take on any integer value from -6 to +6.
->Obviously, that condition does not occur unless we have six 3-point scales, exactly twice the number of 5-point scales.
->In fact, it can be shown that twice as many 3-point scales will always be required to achieve this type of parity with 5-point scales.
-
-To check this logic, the below table shows the number of possible summary scores with 1-8 goals and with 3, 5 or 7-point scales:
-
-```{r}
-d <- crossing(
-  n_goals = 1:8,
-  n_levels = c(3, 5, 7)
-) %>%
-  rowwise() %>%
-  mutate(
-    summary_values = map2_int(
-      n_goals, n_levels,
-      ~{
-        min_score <- n_goals
-        max_score <- n_goals * n_levels
-        
-        as.integer(max_score - min_score + 1)
-      }
-    )
-  ) %>%
-  ungroup()
-d %>%
-  pivot_wider(names_from = n_levels, values_from = summary_values) %>%
-  gt() %>%
-  gt::tab_spanner(
-    label = "Number of attainment levels",
-    columns = c(`3`, `5`, `7`)
-  ) %>%
-  gt::data_color(
-    columns = c(`3`, `5`, `7`),
-    colors = scales::col_numeric(ardea::ardea_pal("purple_blue")(2),
-                                 domain = c(min(d$summary_values),
-                                            max(d$summary_values)))
-  )
+p <- d %>%
+  ggplot(aes(x_continuous)) +
+  geom_density(fill = "lightgrey") +
+  labs(x = "Latent goal scores")
+p
 ```
 
+Latent goal scores are then discretized into the 5-point scales according to a set of thresholds.
+The thresholds proposed by @Urach2019 were equally spaced along along the inverse cumulative normal distribution $\Phi^{-1}$:
+
+$$
+c_t = \Phi^{-1} (0.2t), \ \ \ \ \  t = 0, \dots, 5
+$$
+
+Here is how those thresholds look overlaid on the latent variable scale:
+
+```{r fig.height=3, fig.width=4}
+thresh_unif <- qnorm(seq(0, 1, 0.2), mean = 0, sd = 1)
+
+p +
+  geom_vline(xintercept = thresh_unif, lty = 2)
+```
+
+And this is the resulting distribution of discrete goal scores:
+
+```{r fig.height = 3, fig.width=4}
+d <- d %>%
+  mutate(
+    x_discrete_unif = gasr::discretize_from_thresholds(x_continuous,
+                                                       thresh_unif),
+    x_discrete_unif = factor(x_discrete_unif, levels = -2:2,
+                             labels = c("-2", "-1", "0", "+1", "+2"))
+  )
+d %>%
+  count(x_discrete_unif) %>%
+  mutate(p = n / sum(n)) %>%
+  ggplot(aes(x = x_discrete_unif, y = n)) +
+  geom_col(fill = "lightgrey", color = "black") +
+  geom_text(aes(label = scales::percent(p, accuracy = 0.1)), vjust = 0) +
+  labs("Discrete goal scores (uniform thresholds)")
+```
+
+Theses thresholds, on the other hand:
+
+```{r fig.height=3, fig.width=4}
+thresh_norm <- gasr::create_thresholds()
+p +
+  geom_vline(xintercept = thresh_norm, lty = 2)
+```
+
+Which produce an approximately normal distribution of 5-point scores:
+
+```{r fig.height = 3, fig.width=4}
+d <- d %>%
+  mutate(
+    x_discrete_norm = gasr::discretize_from_thresholds(x_continuous,
+                                                       thresh_norm),
+    x_discrete_norm = factor(x_discrete_norm, levels = -2:2,
+                             labels = c("-2", "-1", "0", "+1", "+2"))
+  )
+d %>%
+  count(x_discrete_norm) %>%
+  mutate(p = n / sum(n)) %>%
+  ggplot(aes(x = x_discrete_norm, y = n)) +
+  geom_col(fill = "lightgrey", color = "black") +
+  geom_text(aes(label = scales::percent(p, accuracy = 0.1)), vjust = 0) +
+  labs("Discrete goal scores (normal thresholds)")
+```
+
+How does the difference in score distributions affect the power to detect a treatment effect, and the estimated size of that treatment effect?
 
 # Analysis
 
@@ -102,141 +122,367 @@ Load the data:
 
 ```{r}
 #tar_load(sim_data_ttest)
-tar_load(sim_data_power)
+tar_load(sim_data_tscore_power)
+tar_load(sim_data_mean_score_power)
+tar_load(sim_data_mean_score_perf)
+tar_load(sim_data_mean_score_ttest)
+tar_load(sim_data_tscore_ttest)
+tar_load(sim_data_tscore_effect_size)
 ```
 
 Pre-process:
 
 ```{r}
-sim_data_power <- sim_data_power %>%
+sim_data_power <-
+  bind_rows(
+    "tscore" = sim_data_tscore_power,
+    "mean_score" = sim_data_mean_score_power,
+    .id = "summary_score"
+  ) %>%
+  # Add some labels for plotting
   mutate(
     n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
     power_label = scales::percent(power, accuracy = 1),
-    n_goals_n_levels = glue("{n_goals} goals, {n_levels} levels"),
-    n_possible_values = n_goals * (n_levels - 1) + 1
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+sim_data_mean_score_perf <-
+  sim_data_mean_score_perf %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
   )
 ```
-
 
 The parameter combinations that were simulated:
 
 ```{r}
 sim_data_power %>%
-  select(n_goals, n_levels, n_subjects, delta, n_sim) %>%
+  distinct(n_subjects, delta, n_goals, n_sim) %>%
   gt() %>%
   tab_options(container.height = 300,
               container.overflow.y = TRUE)
 ```
 
-Visualize the power for each combination:
+Visualize the power for 40 subjects for the T-score:
 
-```{r fig.width=10, fig.height=6}
+```{r}
 sim_data_power %>%
-  ggplot(aes(x = factor(n_goals), y = factor(n_levels))) +
-  geom_tile(aes(fill = power)) +
-  geom_text(aes(label = power_label), color = "white") +
-  facet_wrap(~n_subjects_delta, ncol = 3) +
-  theme(legend.position = "none") +
-  scale_x_discrete(expand = c(0, 0)) +
-  scale_y_discrete(expand = c(0, 0)) +
-  labs(x = "Number of goals per subject",
-       y = "Number of attainment levels")
-```
-
-```{r fig.width=8, fig.height=6}
-sim_data_power %>%
-  ggplot(aes(x = n_goals, y = power, color = factor(n_levels))) +
-  geom_point() +
+  filter(n_subjects == 40, summary_score == "tscore") %>%
+  ggplot(aes(x = delta, y = power, color = score_dist_label)) +
   geom_line() +
-  scale_y_continuous(
-    "Power",
-    breaks = seq(0, 1, 0.2),
-    limits = c(0, 1), labels = scales::percent_format(1)
-  ) +
-  scale_x_continuous(
-    "Number of goals per subject",
-    breaks = seq(1, 7, 2)
-  ) +
-  labs(color = "Number of attainment levels") +
-  facet_wrap(~n_subjects_delta, ncol = 3) +
-  theme(legend.position = "top")
-```
-
-Same as above, but plot the difference in power relative to 5 attainment levels:
-
-```{r fig.width=8, fig.height=6}
-sim_data_power %>%
-  group_by(n_subjects_delta, n_goals) %>%
-  mutate(power_diff = power - power[n_levels == 5]) %>%
-  ggplot(aes(x = n_goals, y = power_diff, color = factor(n_levels))) +
   geom_point() +
-  geom_line() +
-  scale_y_continuous(
-    "Power difference from 5 attainment levels",
-    labels = scales::percent_format(1)
-  ) +
-  scale_x_continuous(
-    "Number of goals per subject",
-    breaks = seq(1, 7, 2)
-  ) +
-  labs(color = "Number of attainment levels") +
-  facet_wrap(~n_subjects_delta, ncol = 3) +
-  theme(legend.position = "top")
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Power", labels = scales::percent) +
+  labs(color = "Score distribution",
+       title = "Power vs treatment effect for 40 subjects",
+       subtitle = "T-score method") +
+  theme(legend.position = c(0.7, 0.2))
 ```
 
-Put these power differences into a table:
+```{r}
+sim_data_power %>%
+  filter(n_subjects == 80, summary_score == "tscore") %>%
+  ggplot(aes(x = delta, y = power, color = score_dist_label)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Power", labels = scales::percent) +
+  labs(color = "Score distribution",
+       title = "Power vs treatment effect for 40 subjects",
+       subtitle = "T-score method") +
+  theme(legend.position = c(0.7, 0.2))
+```
 
-```{r fig.width=10, fig.height=6}
-d <- sim_data_power %>%
-  group_by(n_subjects_delta, n_goals) %>%
-  mutate(power_diff = power - power[n_levels == 5]) %>%
-  ungroup() %>%
+
+```{r eval=FALSE, include=FALSE}
+#And for the mean score:
+sim_data_power %>%
+  filter(n_subjects == 40, summary_score == "mean_score") %>%
+  ggplot(aes(x = delta, y = power, color = score_dist_label)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Power", labels = scales::percent) +
+  labs(color = "Score distribution",
+       title = "Power vs treatment effect for 40 subjects",
+       subtitle = "Mean goal score method") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+Are there any parameters combinations where there was a large power difference?
+
+```{r}
+sim_data_power %>%
+  select(n_subjects, delta, n_goals, score_dist, summary_score, power) %>%
+  pivot_wider(names_from = score_dist, values_from = power) %>%
+  rename(power_norm = norm, power_unif = unif) %>%
   mutate(
-    power_diff_label = ifelse(
-      n_levels == 5,
-      scales::percent(power, accuracy = 1),
-      scales::percent(power_diff, accuracy = 1)
-    ),
-    # Put a "+" sign on power gains
-    power_diff_label = ifelse(
-      n_levels != 5 & power_diff > 0.0,
-      str_c("+", power_diff_label), power_diff_label
-    )
-  )
-d %>%
-  ggplot(aes(x = factor(n_goals), y = factor(n_levels))) +
+    power_diff = power_norm - power_unif
+  ) %>%
+  arrange(desc(abs(power_diff))) %>%
+  mutate(across(c(power_norm, power_unif, power_diff),
+                ~scales::percent(., accuracy = 0.1))) %>%
+  gt() %>%
+  tab_options(container.height = 300,
+              container.overflow.y = TRUE)
+```
+
+Compute power difference for each parameter combination:
+
+```{r fig.width=12, fig.height=8}
+sim_data_power %>%
+  filter(summary_score == "tscore") %>%
+  select(n_subjects, delta, n_goals, score_dist, power,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = power) %>%
+  rename(power_norm = norm, power_unif = unif) %>%
+  mutate(
+    power_diff = power_norm - power_unif,
+    power_diff_label = glue("{scales::percent(power_diff, accuracy = 0.1)}",
+                            "\n({scales::percent(power_norm, accuracy = 0.1)})")
+  ) %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
   geom_tile(aes(fill = power_diff)) +
   geom_text(aes(label = power_diff_label), color = "white") +
-  facet_wrap(~n_subjects_delta, ncol = 3) +
+  facet_wrap(~n_goals_label) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0)) +
+  labs(title = "Difference in power, normal - uniform scores")
+```
+
+Compute effect size mean and SE:
+
+```{r}
+sim_data_mean_score_diff_mean_se <- 
+  sim_data_mean_score_ttest %>%
+  filter(stat == "score_diff") %>%
+  group_by(n_subjects, delta, n_goals, score_dist) %>%
+  summarise(
+    n_sim = n(),
+    mean_score_diff = mean(-value),
+    mean_score_diff_se = mean_score_diff / sqrt(n_sim),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+sim_data_tscore_diff_mean_se <- 
+  sim_data_tscore_ttest %>%
+  filter(stat == "tscore_diff") %>%
+  group_by(n_subjects, delta, n_goals, score_dist) %>%
+  summarise(
+    n_sim = n(),
+    tscore_diff = mean(-value),
+    tscore_diff_se = tscore_diff / sqrt(n_sim),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+```
+
+And plot for 60 subjects:
+
+```{r eval=FALSE, include=FALSE}
+sim_data_mean_score_diff_mean_se %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = mean_score_diff, color = score_dist_label)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = mean_score_diff - mean_score_diff_se,
+                      ymax = mean_score_diff + mean_score_diff_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Mean difference in goal scores") +
+  labs(color = "Score distribution",
+       title = "Effect size vs treatment effect for 60 subjects",
+       subtitle = "Mean goal score method") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+```{r}
+sim_data_tscore_diff_mean_se %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = tscore_diff, color = score_dist_label)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = tscore_diff - tscore_diff_se,
+                      ymax = tscore_diff + tscore_diff_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Mean difference in T-scores") +
+  labs(color = "Score distribution",
+       title = "Effect size vs treatment effect for 60 subjects",
+       subtitle = "T-score score method") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+Compute the difference in T-scores for each parameter combination:
+
+```{r fig.width=12, fig.height=8}
+sim_data_tscore_diff_mean_se %>%
+  select(n_subjects, delta, n_goals, score_dist, tscore_diff,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = tscore_diff) %>%
+  mutate(
+    score_diff_diff = round(unif - norm, 1),
+    score_diff_diff_label = glue(
+      "{score_diff_diff}\n({round(unif, 1)}-{round(norm, 1)})"
+    )
+  ) %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
+  geom_tile(aes(fill = score_diff_diff)) +
+  geom_text(aes(label = score_diff_diff_label), color = "white") +
+  facet_wrap(~n_goals_label) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0))
+```
+
+The uniform distribution of scores consistently overestimates the treatment effect, by about 2 to 5 points on the T-score.
+
+$$
+d = \frac{\mu_{\text{control}} - \mu_{\text{treatment}}}{\text{SD}_{\text{pooled}}}
+$$
+
+What about standardized effect size?
+
+```{r}
+sim_data_tscore_effect_size_summary <-
+  sim_data_tscore_effect_size %>%
+  group_by(n_subjects, delta, n_goals, score_dist) %>%
+  summarise(
+    n_sim = n(),
+    mean_effect_size = mean(cohen_d),
+    sd_effect_size = sd(cohen_d),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+sim_data_tscore_effect_size_summary %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = mean_effect_size, color = score_dist_label)) +
+  geom_line() +
+  # geom_pointrange(aes(ymin = tscore_diff - tscore_diff_se,
+  #                     ymax = tscore_diff + tscore_diff_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Mean standardized effect size") +
+  labs(color = "Score distribution",
+       title = "Std effect size vs treatment effect for 60 subjects",
+       subtitle = "T-score score method") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+```{r fig.width=12, fig.height=8}
+sim_data_tscore_effect_size_summary %>%
+  select(n_subjects, delta, n_goals, score_dist, mean_effect_size,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = mean_effect_size) %>%
+  mutate(
+    effect_size_diff = unif - norm,
+    effect_size_diff_label = glue(
+      "{round(effect_size_diff, 2)}\n({round(unif, 1)}-{round(norm, 1)})"
+    )
+  ) %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
+  geom_tile(aes(fill = effect_size_diff)) +
+  geom_text(aes(label = effect_size_diff_label), color = "white") +
+  facet_wrap(~n_goals_label) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0))
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+#What about the performance metrics?
+sim_data_mean_score_perf %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = empirical_se, color = score_dist_label)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = empirical_se - empirical_se_se,
+                      ymax = empirical_se + empirical_se_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Empirical standard error") +
+  labs(color = "Score distribution",
+       title = "Empirical standard error vs treatment effect for 60 subjects",
+       subtitle = "Mean goal score method") +
+  theme(legend.position = c(0.7, 0.2))
+  
+```
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+sim_data_mean_score_perf %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = bias, color = score_dist_label)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = bias - bias_se,
+                      ymax = bias + bias_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Bias") +
+  labs(color = "Score distribution",
+       title = "Bias vs treatment effect for 60 subjects",
+       subtitle = "Mean goal score method") +
+  theme(legend.position = c(0.7, 0.2))
+  
+```
+
+
+
+```{r eval=FALSE, fig.height=6, fig.width=10, include=FALSE}
+sim_data_power %>%
+  ggplot(aes(x = factor(n_goals), y = score_dist_label)) +
+  geom_tile(aes(fill = power)) +
+  geom_text(aes(label = power_label), color = "white") +
+  facet_wrap(~n_subjects_delta, ncol = 5) +
   theme(legend.position = "none") +
   scale_x_discrete(expand = c(0, 0)) +
   scale_y_discrete(expand = c(0, 0)) +
   labs(x = "Number of goals per subject",
        y = "Number of attainment levels")
-   
 ```
 
-```{r fig.width=8, fig.height=6, eval=FALSE, echo=FALSE}
-# How does this look when we combine number of goals and number of attainment levels into *number of possible summary scores*:
-
-sim_data_power %>%
-  ggplot(aes(x = n_possible_values, y = power, color = factor(n_levels),
-             group = n_goals)) +
-  geom_point() +
-  geom_line() +
-  scale_y_continuous(
-    "Power",
-    breaks = seq(0, 1, 0.2),
-    #limits = c(0, 1),
-    labels = scales::percent_format(1)
-  ) +
-  scale_x_continuous(
-    "Number of possible summary scores",
-  ) +
-  labs(color = "Number of attainment levels") +
-  facet_wrap(~n_subjects_delta, ncol = 3, scales = "free_y") +
-  theme(legend.position = "top")
-```
 
 
 # Reproducibility

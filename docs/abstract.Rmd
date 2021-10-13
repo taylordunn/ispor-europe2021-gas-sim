@@ -37,30 +37,32 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Abstract
 
-Descriptive title: Number of Goals per Subject and Number of Attainment Level in Goal Attainment Scaling: A Simulation Study
-
-Better title: ??
+Title: Distributional assumptions of goal attainment scaling data: a simulation study
 
 Authors: Taylor, Justin, Kari, Sanja, Susan, Ken
 
 ## Background
 
 Goal attainment scaling (GAS) is a patient-centric outcome measure that captures meaningful change through personally identified goals of treatment.
-Traditionally, it is recommended to set a minimum of three goals per subject, each with a 5-point scale of possible outcomes called attainment levels.
-Using data simulation techniques, we investigated the relationship between the number of goals per subject, number of attainment levels per goal, and the statistical power of detecting a treatment effect in a cross-sectional trial.
+Typically, each patient sets a minimum of three goals, and for each goal a 5-point attainment scale is defined to describe possible outcomes, with the midpoint of the scale representing the "expected outcome" under the intervention.
+A key assumption in traditional GAS analysis is that the distribution of scores on the scale approximate a normal distribution.
+Using data simulation techniques, we investigated the implications of this assumption.
 
 ## Methods
 
-We employed a probabilistic model introduced by Urach et al. (2019) for generating GAS data.
-We varied the number of subjects $m$ (40, 60, 80; randomly allocated to control or treatment group with equal probability), the treatment effect size $\delta$ (0.3, 0.4, 0.5), and the parameters of interest: number of goals per subject $n_g$ (from 1 to 7), and the number of attainment levels $n_a$ (3, 5, 7).
+We employed a probabilistic latent variable model introduced by Urach et al. (2019) for generating GAS data.
+We varied the number of subjects $m$ (40, 60, 80; randomly allocated to control or treatment group with equal probability), the treatment effect size $\delta$ (0.3, 0.5, 0.7, 0.9 and 1.1), and the number of goals per subject $n$ (from 1 to 5 goals).
+Latent goal scores were discretized into 5-point scales using two sets of thresholds: "uniform" thresholds were equally spaced so to return a uniform distribution of scores, and "normal" thresholds were spaced so to return an approximately normal distribution of scores.
 For each set of parameters, 1000 trials were simulated and a two-sided $t$-test was performed on summary T-scores.
 Power was computed as the percentage of simulations detecting a significant treatment effect at $\alpha$ = 0.05.
 
 ## Results
 
-The gains in statistical power were minimal or non-zero when varying number of attainment levels $n_a$.
+The statistical power did not vary significantly whether using uniform or normal thresholds -- less than 1% difference for most parameter combinations.
+There was a consistent difference, however, in the estimated effect size (difference between treatment and control group scores).
+Across all parameter combinations, the uniform thresholds gave standardized effect sizes
+between 1.7 and 4.6 points higher than those with the normal thresholds.
 
 ## Conclusions
 
-When planning a study that employs GAS, there is a minor trade-off in statistical power between number of goals and number of attainment levels.
-In scenarios where it is feasible to set a high number of goals per subject, it may be appropriate to construct 3-point scales in order to save time during goal-setting interviews.
+Violating the distributional assumptions of goal attainment scaling data may lead to biased estimates of treatment effect size, though it is unlikely to affect the power to detect a treatment effect.
