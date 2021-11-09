@@ -1,0 +1,359 @@
+---
+title: "GAS score distributions"
+subtitle: "A simulation study"
+output: word_document
+bibliography: ../references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 6.5)
+```
+
+```{r packages, include=FALSE}
+library(tidyverse)
+library(here)
+library(ardea)
+library(targets)
+library(glue)
+library(knitr)
+
+extrafont::loadfonts(device = "win", quiet = TRUE)
+set_ardea_defaults()
+```
+
+## Motivation
+
+The simulation technique introduced by @Urach2019 returns latent variable goal scores which (in the absence of a treatment effect) will be normally distributed with mean 0 and SD 1:
+
+```{r fig.height=3, fig.width=4}
+d <- tibble(x_continuous = rnorm(1e4, mean = 0, sd = 1))
+
+p <- d %>%
+  ggplot(aes(x_continuous)) +
+  geom_density(fill = "lightgrey") +
+  labs(x = "Latent goal scores")
+p
+```
+
+Latent goal scores are then discretized into the 5-point scales according to a set of thresholds.
+The thresholds proposed by @Urach2019 were equally spaced along along the inverse cumulative normal distribution $\Phi^{-1}$:
+
+$$
+c_t = \Phi^{-1} (0.2t), \ \ \ \ \  t = 0, \dots, 5
+$$
+
+Here is how those thresholds look overlaid on the latent variable scores:
+
+```{r fig.height=3, fig.width=4}
+thresh_unif <- qnorm(seq(0, 1, 0.2), mean = 0, sd = 1)
+
+p +
+  geom_vline(xintercept = thresh_unif, lty = 2)
+```
+
+And the resulting distribution of discrete goal scores is uniform:
+
+```{r fig.height = 3, fig.width=4}
+d <- d %>%
+  mutate(
+    x_discrete_unif = gasr::discretize_from_thresholds(x_continuous,
+                                                       thresh_unif),
+    x_discrete_unif = factor(x_discrete_unif, levels = -2:2,
+                             labels = c("-2", "-1", "0", "+1", "+2"))
+  )
+d %>%
+  count(x_discrete_unif) %>%
+  mutate(p = n / sum(n)) %>%
+  ggplot(aes(x = x_discrete_unif, y = n)) +
+  geom_col(fill = "lightgrey", color = "black") +
+  geom_text(aes(label = scales::percent(p, accuracy = 0.1)), vjust = 0) +
+  labs(x = "Discrete goal scores (uniform thresholds)")
+```
+
+Theses thresholds, on the other hand:
+
+```{r fig.height=3, fig.width=4}
+thresh_norm <- gasr::create_thresholds()
+p +
+  geom_vline(xintercept = thresh_norm, lty = 2)
+```
+
+Produce an approximately normal distribution of 5-point scores:
+
+```{r fig.height=3, fig.width=4}
+d <- d %>%
+  mutate(
+    x_discrete_norm = gasr::discretize_from_thresholds(x_continuous,
+                                                       thresh_norm),
+    x_discrete_norm = factor(x_discrete_norm, levels = -2:2,
+                             labels = c("-2", "-1", "0", "+1", "+2"))
+  )
+d %>%
+  count(x_discrete_norm) %>%
+  mutate(p = n / sum(n)) %>%
+  ggplot(aes(x = x_discrete_norm, y = n)) +
+  geom_col(fill = "lightgrey", color = "black") +
+  geom_text(aes(label = scales::percent(p, accuracy = 0.1)), vjust = 0) +
+  labs(x = "Discrete goal scores (normal thresholds)")
+```
+
+This normal distribution of scores is a key assumption in the analysis of GAS data [@Kiresuk1993].
+Recovering this distribution relies on the skill of the GAS interviewers to set appropriate scales.
+
+Our question: how robust is GAS to violating this distributional assumption?
+Or, more specifically, how does the difference in score distributions affect the power to detect a treatment effect, and the estimated size of that treatment effect?
+
+\newpage
+
+## Methods
+
+```{r}
+tar_load(sim_data_tscore_power)
+tar_load(sim_data_mean_score_power)
+tar_load(sim_data_mean_score_perf)
+tar_load(sim_data_mean_score_ttest)
+tar_load(sim_data_tscore_ttest)
+tar_load(sim_data_tscore_effect_size)
+
+# Pre-process
+sim_data_power <-
+  bind_rows(
+    "tscore" = sim_data_tscore_power,
+    "mean_score" = sim_data_mean_score_power,
+    .id = "summary_score"
+  ) %>%
+  # Add some labels for plotting
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    power_label = scales::percent(power, accuracy = 1),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+sim_data_mean_score_perf <-
+  sim_data_mean_score_perf %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+```
+
+The number of subjects, the treatment effect size (delta), and the number of goals were varied:
+
+```{r}
+sim_data_power %>%
+  distinct(n_subjects, delta, n_goals) %>%
+  pivot_longer(cols = everything(),
+               names_to = "variable", values_to = "values") %>%
+  group_by(variable) %>%
+  summarise(
+    values = str_c(unique(values), collapse = ",")
+  ) %>%
+  kable()
+```
+
+Each combination of these parameters was used to run 1000 simulations of a cross-sectional trial with subjects equally allocated to either treatment or control groups.
+The resulting latent scores were discretized two ways: with "uniform" thresholds, and with "normal" thresholds.
+T-scores were calculated for each subject, and t-tests were used to test for a significant difference.
+Power was estimated as the percentage of the 1000 trials with a significant difference at $\alpha = 0.05$.
+
+\newpage
+
+## Results
+
+### Power
+
+The difference in statistical power (normal power - uniform power) for each parameter combination:
+
+```{r fig.width=7, fig.height=9}
+sim_data_power_diff <- sim_data_power %>%
+  filter(summary_score == "tscore") %>%
+  select(n_subjects, delta, n_goals, score_dist, power,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = power) %>%
+  rename(power_norm = norm, power_unif = unif) %>%
+  mutate(
+    power_diff = power_norm - power_unif,
+    power_diff_label = glue("{scales::percent(power_diff, accuracy = 0.1)}",
+                            "\n({scales::percent(power_norm, accuracy = 0.1)})")
+  )
+sim_data_power_diff %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
+  geom_tile(aes(fill = power_diff)) +
+  geom_text(aes(label = power_diff_label), color = "white") +
+  facet_wrap(~n_goals_label, ncol = 2) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0)) +
+  labs(title = "Difference in power beween normal and uniform scores",
+       subtitle = "(Power with normal scores)")
+```
+
+Out of the of 75 parameter combinations, only 20 had power differences $\geq$ 1%.
+
+Here is how that looks for 60 subjects:
+
+```{r}
+sim_data_power %>%
+  filter(n_subjects == 60, summary_score == "tscore") %>%
+  ggplot(aes(x = delta, y = power, color = score_dist_label)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Power", labels = scales::percent) +
+  labs(color = "Score distribution",
+       title = "Power vs treatment effect for 40 subjects") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+### Non-standardized effect size
+
+In terms of the difference in raw T-scores $\Delta T$ (the non-standardized effect size), we expect higher T-scores in the uniform case because of the wider spread of the data.
+Below is the difference between normal and uniform scores ($\Delta T_{\text{norm}} - \Delta T_{\text{unif}}$):
+
+```{r fig.width=7, fig.height=9}
+sim_data_tscore_diff_mean_se <-  sim_data_tscore_ttest %>%
+  filter(stat == "tscore_diff") %>%
+  group_by(n_subjects, delta, n_goals, score_dist) %>%
+  summarise(
+    n_sim = n(),
+    tscore_diff = mean(-value),
+    tscore_diff_se = tscore_diff / sqrt(n_sim),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+sim_data_tscore_diff_mean_se %>%
+  select(n_subjects, delta, n_goals, score_dist, tscore_diff,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = tscore_diff) %>%
+  mutate(
+    score_diff_diff = round(norm - unif, 1),
+    score_diff_diff_label = glue(
+      "{score_diff_diff}\n({round(norm, 1)}-{round(unif, 1)})"
+    )
+  ) %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
+  geom_tile(aes(fill = abs(score_diff_diff))) +
+  geom_text(aes(label = score_diff_diff_label), color = "white") +
+  facet_wrap(~n_goals_label, ncol = 2) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0)) +
+  labs(
+    title = str_c("Difference in non-standardized effect size (T-scores) beween\n",
+                  "normal and uniform scores")
+  )
+```
+
+Here is how that looks for 60 subjects:
+
+```{r}
+sim_data_tscore_diff_mean_se %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = tscore_diff, color = score_dist_label)) +
+  geom_line() +
+  geom_pointrange(aes(ymin = tscore_diff - tscore_diff_se,
+                      ymax = tscore_diff + tscore_diff_se)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Mean difference in T-scores") +
+  labs(
+    color = "Score distribution",
+    title = "Non-standardized effect size vs treatment effect for 60 subjects"
+  ) +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+### Standardized effect size
+
+To account for the wider range of scores in the uniform case, we can look at standardized effect size using Cohen's $d$:
+
+$$
+d = \frac{\mu_{\text{treatment}} - \mu_{\text{control}}}{\sigma_{\text{pooled}}}
+$$
+
+(SRM was not calculated because we don't have change scores -- we are only simulating a single point in time and comparing scores between groups.)
+
+```{r fig.width=7, fig.height=9}
+sim_data_tscore_effect_size_summary <-
+  sim_data_tscore_effect_size %>%
+  group_by(n_subjects, delta, n_goals, score_dist) %>%
+  summarise(
+    n_sim = n(),
+    mean_effect_size = mean(cohen_d),
+    sd_effect_size = sd(cohen_d),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
+    n_subjects_n_goals = glue("{n_subjects} subjects, ",
+                              "{n_goals} goals per subject"),
+    n_goals_label = glue("{n_goals} goals per subject"),
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  )
+
+sim_data_tscore_effect_size_summary %>%
+  select(n_subjects, delta, n_goals, score_dist, mean_effect_size,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = mean_effect_size) %>%
+  mutate(
+    effect_size_diff = norm - unif,
+    effect_size_diff_label = glue(
+      "{round(effect_size_diff, 2)}\n({round(norm, 1)}-{round(unif, 1)})"
+    )
+  ) %>%
+  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
+  geom_tile(aes(fill = effect_size_diff)) +
+  geom_text(aes(label = effect_size_diff_label), color = "white") +
+  facet_wrap(~n_goals_label, ncol = 2) +
+  theme(legend.position = "none") +
+  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
+  scale_y_discrete("Number of subjects", expand = c(0, 0)) +
+  labs(title = str_c("Difference in standardized effect size (T-scores) beween\n",
+                     "normal and uniform scores"))
+```
+
+For large simulated effect sizes ($\delta$ = 0.9, 1.1), the estimated effect sizes are higher when using normal scores compared to uniform.
+Below that ($\delta$ = 0.7, 0.5, 0.3), the difference is small or negligible.
+
+Here is how that looks for 60 subjects:
+
+```{r}
+sim_data_tscore_effect_size_summary %>%
+  filter(n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = mean_effect_size, color = score_dist_label)) +
+  geom_line() +
+  geom_point() +
+  # geom_pointrange(aes(ymin = mean_effect_size - sd_effect_size,
+  #                     ymax = mean_effect_size + sd_effect_size)) +
+  facet_wrap(~n_goals_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Standardized effect size") +
+  labs(
+    color = "Score distribution",
+    title = "Standardized effect size vs treatment effect for 60 subjects"
+  ) +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+\newpage
+
+## References

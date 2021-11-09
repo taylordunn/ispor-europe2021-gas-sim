@@ -116,29 +116,105 @@ d %>%
 
 How does the difference in score distributions affect the power to detect a treatment effect, and the estimated size of that treatment effect?
 
-# Analysis
+# Simulation methodology
 
-Load the data:
+To investigate this question, we will use the `gasr` package, available [here](https://github.com/taylordunn/gasr), which uses the method proposed by @Urach2019.
+In brief, GAS data will be simulated as follows:
 
 ```{r}
-#tar_load(sim_data_ttest)
-tar_load(sim_data_tscore_power)
-tar_load(sim_data_mean_score_power)
-tar_load(sim_data_mean_score_perf)
-tar_load(sim_data_mean_score_ttest)
-tar_load(sim_data_tscore_ttest)
-tar_load(sim_data_tscore_effect_size)
+library(gasr)
+
+# Set the inter-correlation between goals
+rho_0 <- 0.3
+# And define the variances in terms of the goal inter-correlation
+#  such that sigma_u^2 + sigma_e^2 = 1
+sigma_u <- sqrt(rho_0)
+sigma_e <- sqrt(1 - rho_0)
+
+d <- sim_trial(
+  n_subjects = 40, n_goals = 3, delta = 0.3, 
+  sigma_u = sigma_u, sigma_e = sigma_e,
+  score_dist = "norm" # the default argument
+)
 ```
+
+By default, `score_discrete` will be derived with normal thresholds (`score_dist` = "norm").
+We can change the argument to `score_dist` = "unif", but it is simpler to use the same simulated `score_continuous` and apply uniform thresholds manually:
+
+```{r fig.height=8}
+d <- d %>%
+  rename(score_discrete_norm = score_discrete) %>%
+  mutate(
+    score_discrete_unif = discretize_from_thresholds(
+      score_continuous, thresh_unif
+    )
+  )
+d_long <- d %>%
+  select(subject_id, group, score_continuous,
+         score_discrete_norm, score_discrete_unif) %>%
+  pivot_longer(cols = starts_with("score_discrete"),
+               names_to = "distribution", values_to = "score_discrete") %>%
+  mutate(distribution = str_remove(distribution, "score_discrete_"))
+thresh_plot <- tibble(
+  distribution = "norm", score_continuous = thresh_norm
+) %>%
+  bind_rows(
+    tibble(distribution = "unif", score_continuous = thresh_unif)
+  ) %>%
+  mutate(
+    # Plot the infinity thresholds at +/- 4
+    score_continuous = case_when(score_continuous < -4 ~ -4,
+                                 score_continuous > 4 ~ 4,
+                                 TRUE ~ score_continuous) 
+  )
+
+p1 <- d_long %>%
+  ggplot(aes(x = score_continuous)) +
+  geom_density(aes(fill = group), alpha = 0.5) +
+  facet_grid(group ~ distribution) +
+  geom_vline(
+    data = thresh_plot, aes(xintercept = score_continuous), lty = 2
+  ) +
+  theme(legend.position = "none")
+p2 <- d_long %>%
+  ggplot(aes(x = factor(score_discrete))) +
+  geom_bar(aes(fill = group), alpha = 0.5) +
+  facet_grid(group ~ distribution) +
+  theme(legend.position = "none")
+library(patchwork)
+p1 / p2
+```
+
+This will done for different numbers of subjects, numbers of goals, and treatment effect size.
+Each set of parameters will be simulated 10,000 times each.
+
+# Analysis
+
+Load the power calculation results:
+
+```{r}
+tar_load(sim_data_tscore_ttest)
+tar_load(sim_data_tscore_ttest_power)
+```
+
+The following simulations were performed:
+
+```{r}
+sim_data_tscore_ttest_power %>%
+  select(-power, -score_dist) %>%
+  distinct() %>%
+  rename_with(~str_remove(., "sim_")) %>%
+  gt() %>%
+  tab_options(container.height = 500, container.overflow.y = TRUE)
+```
+
+## Power
 
 Pre-process:
 
 ```{r}
-sim_data_power <-
-  bind_rows(
-    "tscore" = sim_data_tscore_power,
-    "mean_score" = sim_data_mean_score_power,
-    .id = "summary_score"
-  ) %>%
+d_power <- sim_data_tscore_ttest_power %>%
+  rename_with(~str_remove(., "sim_")) %>%
   # Add some labels for plotting
   mutate(
     n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
@@ -149,33 +225,13 @@ sim_data_power <-
     score_dist_label = factor(score_dist, levels = c("norm", "unif"),
                               labels = c("Normal", "Uniform"))
   )
-sim_data_mean_score_perf <-
-  sim_data_mean_score_perf %>%
-  mutate(
-    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
-    n_subjects_n_goals = glue("{n_subjects} subjects, ",
-                              "{n_goals} goals per subject"),
-    n_goals_label = glue("{n_goals} goals per subject"),
-    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
-                              labels = c("Normal", "Uniform"))
-  )
 ```
 
-The parameter combinations that were simulated:
+Visualize the power for 40 and 80 subjects:
 
 ```{r}
-sim_data_power %>%
-  distinct(n_subjects, delta, n_goals, n_sim) %>%
-  gt() %>%
-  tab_options(container.height = 300,
-              container.overflow.y = TRUE)
-```
-
-Visualize the power for 40 subjects for the T-score:
-
-```{r}
-sim_data_power %>%
-  filter(n_subjects == 40, summary_score == "tscore") %>%
+d_power %>%
+  filter(n_subjects == 40) %>%
   ggplot(aes(x = delta, y = power, color = score_dist_label)) +
   geom_line() +
   geom_point() +
@@ -184,14 +240,13 @@ sim_data_power %>%
                      breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
   scale_y_continuous("Power", labels = scales::percent) +
   labs(color = "Score distribution",
-       title = "Power vs treatment effect for 40 subjects",
-       subtitle = "T-score method") +
+       title = "Power vs treatment effect for 40 subjects") +
   theme(legend.position = c(0.7, 0.2))
 ```
 
 ```{r}
-sim_data_power %>%
-  filter(n_subjects == 80, summary_score == "tscore") %>%
+d_power %>%
+  filter(n_subjects == 80) %>%
   ggplot(aes(x = delta, y = power, color = score_dist_label)) +
   geom_line() +
   geom_point() +
@@ -200,34 +255,15 @@ sim_data_power %>%
                      breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
   scale_y_continuous("Power", labels = scales::percent) +
   labs(color = "Score distribution",
-       title = "Power vs treatment effect for 40 subjects",
-       subtitle = "T-score method") +
+       title = "Power vs treatment effect for 80 subjects") +
   theme(legend.position = c(0.7, 0.2))
 ```
 
-
-```{r eval=FALSE, include=FALSE}
-#And for the mean score:
-sim_data_power %>%
-  filter(n_subjects == 40, summary_score == "mean_score") %>%
-  ggplot(aes(x = delta, y = power, color = score_dist_label)) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~n_goals_label) +
-  scale_x_continuous("Treatment effect size",
-                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
-  scale_y_continuous("Power", labels = scales::percent) +
-  labs(color = "Score distribution",
-       title = "Power vs treatment effect for 40 subjects",
-       subtitle = "Mean goal score method") +
-  theme(legend.position = c(0.7, 0.2))
-```
-
-Are there any parameters combinations where there was a large power difference?
+What were the parameter combinations with the largest power differences?
 
 ```{r}
-sim_data_power %>%
-  select(n_subjects, delta, n_goals, score_dist, summary_score, power) %>%
+d_power %>%
+  select(n_subjects, delta, n_goals, score_dist, power) %>%
   pivot_wider(names_from = score_dist, values_from = power) %>%
   rename(power_norm = norm, power_unif = unif) %>%
   mutate(
@@ -241,11 +277,10 @@ sim_data_power %>%
               container.overflow.y = TRUE)
 ```
 
-Compute power difference for each parameter combination:
+Plot power difference for each parameter combination:
 
 ```{r fig.width=12, fig.height=8}
-sim_data_power %>%
-  filter(summary_score == "tscore") %>%
+d_power %>%
   select(n_subjects, delta, n_goals, score_dist, power,
          n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
   pivot_wider(names_from = score_dist, values_from = power) %>%
@@ -265,38 +300,24 @@ sim_data_power %>%
   labs(title = "Difference in power, normal - uniform scores")
 ```
 
+## Effect size
+
 Compute effect size mean and SE:
 
 ```{r}
-sim_data_mean_score_diff_mean_se <- 
-  sim_data_mean_score_ttest %>%
-  filter(stat == "score_diff") %>%
-  group_by(n_subjects, delta, n_goals, score_dist) %>%
+d_effect_size <- sim_data_tscore_ttest %>%
+  rename_with(~str_remove(., "sim_")) %>%
+  filter(stat %in% c("cohen_d", "tscore_diff",
+                     "tscore_diff_conf_low", "tscore_diff_conf_high")) %>%
+  group_by(n_subjects, n_goals, delta, rho, score_dist, stat) %>%
   summarise(
     n_sim = n(),
-    mean_score_diff = mean(-value),
-    mean_score_diff_se = mean_score_diff / sqrt(n_sim),
+    mean_value = mean(value), sd_value = sd(value),
     .groups = "drop"
   ) %>%
   mutate(
-    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
-    n_subjects_n_goals = glue("{n_subjects} subjects, ",
-                              "{n_goals} goals per subject"),
-    n_goals_label = glue("{n_goals} goals per subject"),
-    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
-                              labels = c("Normal", "Uniform"))
-  )
-sim_data_tscore_diff_mean_se <- 
-  sim_data_tscore_ttest %>%
-  filter(stat == "tscore_diff") %>%
-  group_by(n_subjects, delta, n_goals, score_dist) %>%
-  summarise(
-    n_sim = n(),
-    tscore_diff = mean(-value),
-    tscore_diff_se = tscore_diff / sqrt(n_sim),
-    .groups = "drop"
-  ) %>%
-  mutate(
+    n_subjects_label = glue("{n_subjects} subjects"),
+    delta_label = glue("delta = {delta}"),
     n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
     n_subjects_n_goals = glue("{n_subjects} subjects, ",
                               "{n_goals} goals per subject"),
@@ -306,115 +327,147 @@ sim_data_tscore_diff_mean_se <-
   )
 ```
 
-And plot for 60 subjects:
-
-```{r eval=FALSE, include=FALSE}
-sim_data_mean_score_diff_mean_se %>%
-  filter(n_subjects == 60) %>%
-  ggplot(aes(x = delta, y = mean_score_diff, color = score_dist_label)) +
-  geom_line() +
-  geom_pointrange(aes(ymin = mean_score_diff - mean_score_diff_se,
-                      ymax = mean_score_diff + mean_score_diff_se)) +
-  facet_wrap(~n_goals_label) +
-  scale_x_continuous("Treatment effect size",
-                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
-  scale_y_continuous("Mean difference in goal scores") +
-  labs(color = "Score distribution",
-       title = "Effect size vs treatment effect for 60 subjects",
-       subtitle = "Mean goal score method") +
-  theme(legend.position = c(0.7, 0.2))
-```
+The difference in mean T-scores for 60 subjects:
 
 ```{r}
-sim_data_tscore_diff_mean_se %>%
-  filter(n_subjects == 60) %>%
-  ggplot(aes(x = delta, y = tscore_diff, color = score_dist_label)) +
+d_effect_size %>%
+  filter(stat == "tscore_diff", n_subjects == 60) %>%
+  # Reverse the sign on the score difference so that a positive value
+  #  indicates higher scores in the treatment arm
+  mutate(mean_value = -mean_value) %>%
+  ggplot(aes(x = delta, y = mean_value, color = score_dist_label)) +
+  geom_point() +
   geom_line() +
-  geom_pointrange(aes(ymin = tscore_diff - tscore_diff_se,
-                      ymax = tscore_diff + tscore_diff_se)) +
   facet_wrap(~n_goals_label) +
   scale_x_continuous("Treatment effect size",
                      breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
   scale_y_continuous("Mean difference in T-scores") +
   labs(color = "Score distribution",
-       title = "Effect size vs treatment effect for 60 subjects",
-       subtitle = "T-score score method") +
+       title = "Effect size vs treatment effect for 60 subjects") +
   theme(legend.position = c(0.7, 0.2))
 ```
 
-Compute the difference in T-scores for each parameter combination:
-
-```{r fig.width=12, fig.height=8}
-sim_data_tscore_diff_mean_se %>%
-  select(n_subjects, delta, n_goals, score_dist, tscore_diff,
-         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
-  pivot_wider(names_from = score_dist, values_from = tscore_diff) %>%
-  mutate(
-    score_diff_diff = round(unif - norm, 1),
-    score_diff_diff_label = glue(
-      "{score_diff_diff}\n({round(unif, 1)}-{round(norm, 1)})"
-    )
-  ) %>%
-  ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
-  geom_tile(aes(fill = score_diff_diff)) +
-  geom_text(aes(label = score_diff_diff_label), color = "white") +
-  facet_wrap(~n_goals_label) +
-  theme(legend.position = "none") +
-  scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
-  scale_y_discrete("Number of subjects", expand = c(0, 0))
-```
-
-The uniform distribution of scores consistently overestimates the treatment effect, by about 2 to 5 points on the T-score.
+In every case, the uniform distribution of scores results in a higher difference in T-score.
+Now look at standardized effect sizes (Cohen's $d$):
 
 $$
-d = \frac{\mu_{\text{control}} - \mu_{\text{treatment}}}{\text{SD}_{\text{pooled}}}
+d = \frac{\mu_{\text{treatment}} - \mu_{\text{control}}}{\sigma_{\text{pooled}}}
 $$
-
-What about standardized effect size?
 
 ```{r}
-sim_data_tscore_effect_size_summary <-
-  sim_data_tscore_effect_size %>%
-  group_by(n_subjects, delta, n_goals, score_dist) %>%
-  summarise(
-    n_sim = n(),
-    mean_effect_size = mean(cohen_d),
-    sd_effect_size = sd(cohen_d),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    n_subjects_delta = glue("{n_subjects} subjects, delta = {delta}"),
-    n_subjects_n_goals = glue("{n_subjects} subjects, ",
-                              "{n_goals} goals per subject"),
-    n_goals_label = glue("{n_goals} goals per subject"),
-    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
-                              labels = c("Normal", "Uniform"))
-  )
-sim_data_tscore_effect_size_summary %>%
-  filter(n_subjects == 60) %>%
-  ggplot(aes(x = delta, y = mean_effect_size, color = score_dist_label)) +
+d_effect_size %>%
+  filter(stat == "cohen_d", n_subjects == 60) %>%
+  ggplot(aes(x = delta, y = mean_value, color = score_dist_label)) +
+  geom_point() +
   geom_line() +
-  # geom_pointrange(aes(ymin = tscore_diff - tscore_diff_se,
-  #                     ymax = tscore_diff + tscore_diff_se)) +
   facet_wrap(~n_goals_label) +
   scale_x_continuous("Treatment effect size",
                      breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
   scale_y_continuous("Mean standardized effect size") +
   labs(color = "Score distribution",
-       title = "Std effect size vs treatment effect for 60 subjects",
-       subtitle = "T-score score method") +
+       title = "Effect size vs treatment effect for 60 subjects") +
   theme(legend.position = c(0.7, 0.2))
 ```
 
-```{r fig.width=12, fig.height=8}
-sim_data_tscore_effect_size_summary %>%
-  select(n_subjects, delta, n_goals, score_dist, mean_effect_size,
-         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
-  pivot_wider(names_from = score_dist, values_from = mean_effect_size) %>%
+Look at 3 goals per subject, and different numbers of subjects:
+
+```{r}
+d_effect_size %>%
+  filter(stat == "cohen_d", n_goals == 3) %>%
+  ggplot(aes(x = delta, y = mean_value, color = score_dist_label)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~n_subjects_label) +
+  scale_x_continuous("Treatment effect size",
+                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
+  scale_y_continuous("Mean standardized effect size") +
+  labs(color = "Score distribution",
+       title = "Effect size vs treatment effect for 3 goals per subject") +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+What were the parameter combinations with the largest effect size differences?
+
+```{r}
+d_effect_size %>%
+  filter(stat == "cohen_d") %>%
+  select(n_subjects, delta, n_goals, score_dist, mean_value, sd_value) %>%
+  pivot_wider(names_from = score_dist,
+              values_from = c(mean_value, sd_value)) %>%
   mutate(
-    effect_size_diff = unif - norm,
+    effect_size_diff = mean_value_norm - mean_value_unif,
+    effect_size_norm = glue(
+      "{round(mean_value_norm, 2)} ({round(sd_value_norm, 2)})"
+    ),
+    effect_size_unif = glue(
+      "{round(mean_value_unif, 2)} ({round(sd_value_unif, 2)})"
+    )
+  ) %>%
+  arrange(desc(abs(effect_size_diff))) %>%
+  mutate(effect_size_diff = round(effect_size_diff, 2)) %>%
+  select(-mean_value_norm, -mean_value_unif, -sd_value_norm, -sd_value_unif) %>%
+  gt() %>%
+  tab_options(container.height = 300,
+              container.overflow.y = TRUE)
+```
+
+It is clear from this ranking that the score distributions make little difference in the measured effect size.
+The largest differences are at the largest effect sizes.
+Take, for example, 40 subjects, 3 goals per subject, and $\delta$ = 1.1:
+
+```{r fig.height=2}
+sim_data_tscore_ttest %>%
+  filter(sim_n_subjects == 40, sim_n_goals == 3, sim_delta == 1.1,
+         stat == "cohen_d") %>%
+  mutate(
+    score_dist_label = factor(score_dist, levels = c("norm", "unif"),
+                              labels = c("Normal", "Uniform"))
+  ) %>%
+  ggplot(aes(y = score_dist_label, x = value)) +
+  geom_jitter(aes(color = score_dist), alpha = 0.05) +
+  geom_boxplot(fill = "white", outlier.shape = NA, width = 0.2) +
+  theme(legend.position = "none") +
+  ardea::theme_ardea(gridlines = "x") +
+  labs(x = "Standardized effect size", y = NULL) +
+  theme(legend.position = "none")
+```
+
+Another way to think of the difference is to consider the percentage of simulations in which the effect size is higher with normal scores vs uniform scores:
+
+```{r}
+sim_data_tscore_ttest %>%
+  filter(stat == "cohen_d") %>%
+  pivot_wider(names_from = score_dist, values_from = value) %>%
+  group_by(across(starts_with("sim_"))) %>%
+  summarise(
+    n_sims = n(), p_higher = mean(norm > unif),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(p_higher)) %>%
+  transmute(
+    n_subjects = sim_n_subjects, n_goals = sim_n_goals, delta = sim_delta,
+    n_sims, p_higher = scales::percent(p_higher, accuracy = 0.1)
+  ) %>%
+  gt() %>%
+  tab_options(container.height = 300, container.overflow.y = TRUE)
+```
+
+At the lower end of the spectrum (i.e. the lowest effect sizes), it is essentially even: in ~51% of simulations, the normal scores return a higher effect size than uniform.
+
+Plot effect size difference for each parameter combination:
+
+```{r fig.width=12, fig.height=8}
+d_effect_size %>%
+  filter(stat == "cohen_d") %>%
+  select(n_subjects, delta, n_goals, score_dist, mean_value,
+         n_subjects_delta, n_subjects_n_goals, n_goals_label) %>%
+  pivot_wider(names_from = score_dist, values_from = mean_value) %>%
+  rename(effect_size_norm = norm, effect_size_unif = unif) %>%
+  mutate(
+    effect_size_diff = effect_size_norm - effect_size_unif,
     effect_size_diff_label = glue(
-      "{round(effect_size_diff, 2)}\n({round(unif, 1)}-{round(norm, 1)})"
+      "{round(effect_size_diff, 2)}",
+      "\n({round(effect_size_norm, 2)})"
     )
   ) %>%
   ggplot(aes(x = factor(delta), y = factor(n_subjects))) +
@@ -423,66 +476,11 @@ sim_data_tscore_effect_size_summary %>%
   facet_wrap(~n_goals_label) +
   theme(legend.position = "none") +
   scale_x_discrete("Treatment effect size", expand = c(0, 0)) +
-  scale_y_discrete("Number of subjects", expand = c(0, 0))
+  scale_y_discrete("Number of subjects", expand = c(0, 0)) +
+  labs(title = "Difference in effect size, normal - uniform")
 ```
 
-
-
-```{r eval=FALSE, include=FALSE}
-#What about the performance metrics?
-sim_data_mean_score_perf %>%
-  filter(n_subjects == 60) %>%
-  ggplot(aes(x = delta, y = empirical_se, color = score_dist_label)) +
-  geom_line() +
-  geom_pointrange(aes(ymin = empirical_se - empirical_se_se,
-                      ymax = empirical_se + empirical_se_se)) +
-  facet_wrap(~n_goals_label) +
-  scale_x_continuous("Treatment effect size",
-                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
-  scale_y_continuous("Empirical standard error") +
-  labs(color = "Score distribution",
-       title = "Empirical standard error vs treatment effect for 60 subjects",
-       subtitle = "Mean goal score method") +
-  theme(legend.position = c(0.7, 0.2))
-  
-```
-
-
-
-
-```{r eval=FALSE, include=FALSE}
-sim_data_mean_score_perf %>%
-  filter(n_subjects == 60) %>%
-  ggplot(aes(x = delta, y = bias, color = score_dist_label)) +
-  geom_line() +
-  geom_pointrange(aes(ymin = bias - bias_se,
-                      ymax = bias + bias_se)) +
-  facet_wrap(~n_goals_label) +
-  scale_x_continuous("Treatment effect size",
-                     breaks = c(0.3, 0.5, 0.7, 0.9, 1.1)) +
-  scale_y_continuous("Bias") +
-  labs(color = "Score distribution",
-       title = "Bias vs treatment effect for 60 subjects",
-       subtitle = "Mean goal score method") +
-  theme(legend.position = c(0.7, 0.2))
-  
-```
-
-
-
-```{r eval=FALSE, fig.height=6, fig.width=10, include=FALSE}
-sim_data_power %>%
-  ggplot(aes(x = factor(n_goals), y = score_dist_label)) +
-  geom_tile(aes(fill = power)) +
-  geom_text(aes(label = power_label), color = "white") +
-  facet_wrap(~n_subjects_delta, ncol = 5) +
-  theme(legend.position = "none") +
-  scale_x_discrete(expand = c(0, 0)) +
-  scale_y_discrete(expand = c(0, 0)) +
-  labs(x = "Number of goals per subject",
-       y = "Number of attainment levels")
-```
-
+Number of subjects makes little difference, and neither does goals per subject.
 
 
 # Reproducibility
